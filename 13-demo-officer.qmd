@@ -74,7 +74,12 @@ doc <- docx_set_paragraph_style(
   base_on = "Normal",
   style_id = "graphic",
   style_name = "Graphic",
-  fp_p = fp_par(text.align = "center", padding.top = 3, padding.bottom = 3)
+  fp_p = fp_par(
+    keep_with_next = TRUE, 
+    text.align = "center", 
+    padding.top = 3, 
+    padding.bottom = 3
+  )
 )
 
 # Save the enriched template
@@ -216,7 +221,7 @@ Now we'll loop through each patient and generate their individual report. Each r
 3. Vital signs plots
 4. Vital signs summary table
 
-```{r}
+```{r office_file = "output/patient-profile/simple/01-701-1015.docx"}
 sub_path <- here("output", "patient-profile", "simple")
 
 # Create output directory
@@ -390,7 +395,7 @@ Key features:
 
 Let's create enhanced patient reports with automatic numbering:
 
-```{r}
+```{r office_file = "output/patient-profile/with-captions/01-701-1015.docx"}
 sub_path <- here("output", "patient-profile", "with-captions")
 
 # Create output directory

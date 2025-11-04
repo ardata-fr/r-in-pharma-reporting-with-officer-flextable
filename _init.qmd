@@ -76,7 +76,15 @@ opts_chunk$set(
 process_link_preview_options  <- function(options){
   if(!is_truthy(options$office_file)) return("")
   lnk_code <- sprintf("\n\nClick to download [%s](%s).\n\n", options$office_file, options$office_file)
-  return(lnk_code)
+  pdf_code <- paste("\n", "```{=html}",
+         "<object data=\"%s\" type=\"application/pdf\" width=\"100%%\" height=\"100%%\" style=\"min-height:100vh;\">",
+         "<p>It appears you don't have a PDF plugin for this browser.</p>",
+         "</object>",
+         "```", "\n",
+         sep = "\n"
+  )
+  pdf_code <- sprintf(pdf_code, gsub("\\.docx$", ".pdf", options$office_file))
+  return(paste0(lnk_code, pdf_code))
 }
 
 is_truthy <- function(x) {

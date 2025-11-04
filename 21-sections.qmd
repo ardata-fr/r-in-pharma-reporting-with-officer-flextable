@@ -14,6 +14,7 @@ dir.create(sub_path, showWarnings = FALSE, recursive = TRUE)
 By default, the layout options of a Word file (orientation, margins, column organization, headers and footers, etc.) affect all pages of a document.
 
 However, you may need to combine several different layouts within the same document. For example:
+
 - Portrait pages for text content, landscape pages for wide tables
 - Different headers/footers for different chapters
 - Multi-column layouts for specific sections
