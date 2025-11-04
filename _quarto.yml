@@ -3,6 +3,8 @@ project:
   resources: ['output', 'data']
 
 book:
+  page-footer:
+    left: "[![](static/img/logo-rinpharma.png){width=60px} R/Pharma Virtual 2025](https://rinpharma.com/docs/RPH2025/)"
   search:
     location: sidebar
     type: overlay
