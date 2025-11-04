@@ -1,0 +1,288 @@
+# Table pagination in Word
+
+{{< include _init.qmd >}}
+
+You can download the parquet files by clicking on the following links:
+
+- [data/AE-TABLE.parquet](data/AE-TABLE.parquet)
+- [data/CT-ARM.parquet](data/CT-ARM.parquet)
+
+```{r}
+AE_TABLE <- arrow::read_parquet(here("data", "AE-TABLE.parquet"))
+CT_ARM <- arrow::read_parquet(here("data", "CT-ARM.parquet"))
+```
+
+This chapter demonstrates how to control table pagination in Word documents using the `paginate()` function from flextable. Proper pagination ensures that tables break across pages in a logical and readable manner.
+
+## Understanding row solidarity
+
+The `paginate()` function works by creating solidarity instructions between specific rows. These instructions tell Word which rows must stay together on the same page, preventing unwanted page breaks.
+
+When applied to tables:
+
+- Header rows must stay with at least the first body row to avoid orphaned headers
+- Group labels must stay with their data rows to maintain context
+- Related rows within a group should remain together when possible
+
+The `paginate()` function automatically manages these solidarity rules to create paginated tables.
+
+## Basic pagination with flextable
+
+### Setting up paths
+
+First, we define the template file and output directory:
+
+```{r}
+path_to_template <- here("template", "template-02.docx")
+sub_path <- file.path("output", "ae-table", "flextable-paginate")
+dir.create(sub_path, showWarnings = FALSE, recursive = TRUE)
+out_path <- file.path(sub_path, "AE-TABLE.docx")
+```
+
+### Creating a paginated table
+
+This example demonstrates pagination for an adverse events table grouped by System Organ Class (SOC):
+
+```{r}
+# Prepare data in wide format
+pivot_tab <- select(AE_TABLE, LABEL, AESOC, AEDECOD, ARM, agg_level, stat_str) |>
+  tidyr::pivot_wider(
+    names_from = "ARM",
+    values_from = "stat_str",
+    values_fill = "0 (0%)"
+  )
+
+# Create flextable with pagination
+ft <- pivot_tab |>
+    flextable(col_keys = c("LABEL", CT_ARM$ARM)) |>
+    # Add superscript notation for percentages
+    append_chunks(
+      i = 1, j = -1, part = "header",
+      as_sup(" (1)")
+    ) |>
+    # Add denominators to header
+    append_chunks(
+      i = 1, j = -1, part = "header",
+      as_chunk(fmt_header_n(CT_ARM$denom, newline = TRUE))
+    ) |>
+    # Indent sub-level items
+    prepend_chunks(
+      j = "LABEL",
+      i = ~ agg_level == 2,
+      as_chunk("\t")
+    ) |> 
+    # Apply variable labels
+    labelizor(
+      labels = c(LABEL = "", unlist(labelled::var_label(adae))),
+      j = "LABEL"
+    ) |>
+    labelizor(
+      labels = stringr::str_to_sentence,
+      j = "LABEL"
+    ) |>
+    # Create compound header for first column
+    mk_par(
+      i = 1, j = 1, part = "header",
+      as_paragraph(
+        labelled::get_variable_labels(adae)$AESOC,
+        "\n\t",
+        labelled::get_variable_labels(adae)$AEDECOD
+      )
+    ) |>
+    add_header_lines("Table 15.3: 1 AE by SOC/PT") |>
+    add_footer_lines(as_paragraph(as_sup("(1)"), " n (%)")) |>
+    align(j = -1, align = "right", part = "all") |>
+    width(width = 1) |>
+    width(width = 2, j = 1) |>
+    # Apply pagination
+    paginate(
+      init = TRUE,
+      hdr_ftr = TRUE,
+      group = "AESOC",
+      group_def = "rle"
+    )
+```
+
+### Understanding paginate() parameters
+
+The `paginate()` function accepts several key parameters:
+
+- `init`: When `TRUE`, resets all previous solidarity instructions before applying new pagination rules
+- `hdr_ftr`: When `TRUE`, creates solidarity between header rows and the first data row to ensure they stay together
+- `group`: Column name containing grouping information (e.g., "AESOC" for System Organ Class)
+- `group_def`: Grouping definition method:
+  - `"rle"`: Uses run-length encoding to detect group changes
+  - `"characterized"`: Uses explicit group identifiers
+
+### How row solidarity is established
+
+When `paginate()` is called with these parameters:
+
+1. Solidarity is created between all header rows and the first body row to prevent orphaned headers
+2. Solidarity is created between the first row of each group and subsequent rows to maintain group cohesion
+3. Within groups, related rows are linked together based on the grouping structure
+4. The last row of each group is free to separate, allowing page breaks between different groups
+
+This ensures that:
+
+- Headers never appear alone at the bottom of a page
+- Group labels always have at least one data row following them
+- Similar groups maintain visual continuity
+
+### Adding the table to a Word document
+
+```{r office_file = out_path}
+# Define section properties with header and footer
+main_sect_prop <- prop_section(
+  page_margins = page_mar(top = 1, bottom = 1, left = 1, right = 1),
+  type = "nextPage",
+  footer_default = block_list(
+    fpar(
+      run_word_field(field = "PAGE \\* MERGEFORMAT"),
+      " on ",
+      run_word_field(field = "NumPages \\* MERGEFORMAT"),
+      " pages"
+    )
+  ),
+  header_default = block_list(
+    fpar("Adverse Events Table")
+  )
+)
+
+# Create document and add paginated table
+doc <- read_docx(path = path_to_template)
+doc <- body_add_flextable(doc, ft, align = "center")
+doc <- body_set_default_section(doc, main_sect_prop)
+doc <- docx_set_settings(doc, even_and_odd_headers = FALSE)
+
+# Save the document
+print(doc, target = out_path)
+```
+
+
+## Alternative approach: Splitting tables into separate sections
+
+An alternative pagination strategy is to split a large table into multiple smaller tables, one per group (e.g., one table per SOC). Each table is then placed in its own section with a custom header showing the group name.
+
+### Setting up output directory
+
+```{r}
+sub_path <- file.path("output", "ae-table", "split-pages")
+dir.create(sub_path, showWarnings = FALSE, recursive = TRUE)
+out_path <- file.path(sub_path, "AE-TABLE.docx")
+```
+
+### Creating multiple paginated tables
+
+This approach splits the data by SOC and creates one flextable per group:
+
+```{r}
+# Prepare data in wide format
+pivot_tab <- select(AE_TABLE, LABEL, AESOC, AEDECOD, ARM, agg_level, stat_str) |>
+  tidyr::pivot_wider(
+    names_from = "ARM",
+    values_from = "stat_str",
+    values_fill = "0 (0%)"
+  )
+
+# Split data by System Organ Class
+lpivot_tab <- split(pivot_tab, pivot_tab$AESOC)
+
+# Create one flextable per SOC
+lft <- lapply(lpivot_tab, function(x) {
+  x |>
+    flextable(col_keys = c("LABEL", CT_ARM$ARM)) |>
+    append_chunks(
+      i = 1, j = -1, part = "header",
+      as_sup(" (1)")
+    ) |>
+    append_chunks(
+      i = 1, j = -1, part = "header",
+      as_chunk(fmt_header_n(CT_ARM$denom, newline = TRUE))
+    ) |>
+    padding(
+      j = "LABEL",
+      i = ~ agg_level == 2,
+      padding.left = 12
+    ) |>
+    labelizor(
+      labels = c(LABEL = "", unlist(labelled::var_label(adae))),
+      j = "LABEL"
+    ) |>
+    labelizor(
+      labels = stringr::str_to_sentence,
+      j = "LABEL"
+    ) |>
+    mk_par(
+      i = 1, j = 1, part = "header",
+      as_paragraph(
+        labelled::get_variable_labels(adae)$AESOC,
+        "\n\t",
+        labelled::get_variable_labels(adae)$AEDECOD
+      )
+    ) |>
+    add_header_lines("Table 15.3: 1 AE by SOC/PT") |>
+    add_footer_lines(as_paragraph(as_sup("(1)"), " n (%)")) |>
+    align(j = -1, align = "right", part = "all") |>
+    width(width = 1) |>
+    width(width = 2, j = 1) |>
+    # Apply pagination within each table
+    paginate(
+      init = TRUE,
+      hdr_ftr = TRUE,
+      group = "AESOC",
+      group_def = "rle"
+    )
+})
+```
+
+### Assembling the document
+
+Each table is added to its own section with a custom header displaying the SOC name:
+
+```{r office_file = out_path}
+# Define default section properties
+main_sect_prop <- prop_section(
+  page_margins = page_mar(top = 1, bottom = 1, left = 1, right = 1),
+  type = "nextPage",
+  footer_default = block_list(
+    fpar(
+      run_word_field(field = "PAGE \\* MERGEFORMAT"),
+      " on ",
+      run_word_field(field = "NumPages \\* MERGEFORMAT"),
+      " pages"
+    )
+  )
+)
+
+# Initialize document
+doc <- read_docx(path = path_to_template)
+
+# Add each table in its own section
+for (ft_name in names(lft)) {
+  # Create section properties with SOC name in header
+  sect_prop_example <- prop_section(
+    page_margins = page_mar(top = 1, bottom = 1, left = 1, right = 1),
+    type = "nextPage",
+    header_default = block_list(
+      fpar(ft_name)
+    )
+  )
+
+  # Add table and close section
+  doc <- body_add_flextable(doc, lft[[ft_name]], align = "center")
+  doc <- body_end_block_section(
+    doc,
+    value = block_section(property = sect_prop_example)
+  )
+}
+
+# Add final marker and set default section
+doc <- body_add_par(doc, "END")
+doc <- body_set_default_section(doc, main_sect_prop)
+doc <- docx_set_settings(doc, even_and_odd_headers = FALSE)
+
+# Save the document
+print(doc, target = out_path)
+```
+

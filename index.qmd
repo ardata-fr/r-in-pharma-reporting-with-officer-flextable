@@ -1,0 +1,93 @@
+# Introduction {.unnumbered}
+
+{{< include _init.qmd >}}
+
+## About this Workshop
+
+This workshop focuses on creating sophisticated clinical reports in Word format
+using R with a reproducible approach. You will learn how to leverage the
+powerful combination of the officer and flextable packages to go from
+clinical data all the way through to complete pharmaceutical report generation.
+
+The pharmaceutical industry requires high-quality, standardized documentation
+that meets rigorous regulatory standards. This workshop demonstrates how R can
+be used to automate the creation of such reports while maintaining full
+reproducibility and compliance with industry best practices.
+
+## What You Will Learn
+
+This workshop is divided into two main parts:
+
+### Part 1: Fundamentals of Table and Document Creation
+
+**Introduction to flextable**
+
+Learn how to create and format sophisticated tables that meet pharmaceutical standards:
+
+- Creating tables from data frames and other R objects
+- Formatting content (numbers, dates, text)
+- Customizing visual properties (colors, fonts, borders)
+- Managing column widths and table layouts
+- Working with headers and footers
+- Building real-world pharmaceutical tables:
+  - Cancer statistics tables with complex layouts
+  - Adverse event tables following industry standards
+
+**Converting data structures to flextable**
+
+Master the `as_flextable()` function to quickly transform common R objects:
+
+- Creating demographic tables with `summarizor()` and `as_flextable()`
+- Building frequency tables from `table()` objects
+
+**Introduction to officer**
+
+Discover how to programmatically create and manipulate Word documents:
+
+- Creating custom paragraph styles for consistent formatting
+- Adding paragraphs, headings, and tables of contents
+- Integrating flextables into Word documents
+- Incorporating ggplot2 visualizations
+- Managing page breaks and document structure
+
+### Part 2: Advanced Clinical Reporting Techniques
+
+**Patient profile reports**
+
+Build complete, individualized patient reports:
+
+- Structuring clinical trial data (CDISC/ADaM datasets) for report generation
+- Creating patient-specific reports with demographics, vital signs, and visualizations
+- Implementing automatic numbering for tables and figures
+- Adding table of tables (ToT) and table of figures (ToF)
+
+**Managing sections in Word documents**
+
+Control document layout with advanced section management:
+
+- Understanding Word section properties
+- Creating sections with custom page orientations (portrait/landscape)
+- Implementing custom headers and footers per section
+- Using even and odd page layouts for professional reports
+- Applying section properties programmatically with `prop_section()`
+
+**Table pagination**
+
+Ensure professional table presentation across pages:
+
+- Understanding row solidarity to prevent awkward page breaks
+- Using `paginate()` to control table flow across pages
+- Keeping headers with data rows
+- Maintaining group cohesion in long tables
+- Choosing between single paginated tables and split tables per section
+
+## Prerequisites
+
+This workshop assumes you are familiar with:
+
+- Basic R programming
+- The tidyverse approach (we will use `|>` pipes)
+- Basic knowledge of 'Microsoft Word'
+
+By the end of this workshop, you will be able to create complete, reproducible pharmaceutical reports that meet industry standards and can be easily maintained and updated as data changes.
+

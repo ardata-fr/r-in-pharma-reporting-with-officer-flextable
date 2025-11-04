@@ -1,0 +1,180 @@
+# Converting data structures to flextable
+
+{{< include _init.qmd >}}
+
+The `as_flextable()` function is a generic function that converts various R objects into flextable objects. This chapter focuses on the most common use cases in pharmaceutical reporting: creating demographic tables with `summarizor()`, frequency tables with `table()` or `proc_freq()`.
+
+## Understanding as_flextable()
+
+The `as_flextable()` function is designed to work with different types of R objects:
+
+- Data frames created by `summarizor()` for summary statistics
+- Tables created by `table()` for frequency distributions
+- Statistical models (lm, glm, gam, merMod, htest, etc.)
+- Other tabular objects
+
+Each method has its own set of parameters to customize the output. The function automatically handles the structure of these objects to create publication-ready tables.
+
+## Demographic tables with summarizor()
+
+The `summarizor()` function computes descriptive statistics for each variable, optionally grouped by categories. It returns a data frame specifically structured to work with `as_flextable()`.
+
+### Basic workflow
+
+The process involves two steps:
+
+1. Use `summarizor()` to compute summary statistics
+2. Use `as_flextable()` to convert the result into a formatted table
+
+```{r}
+ex_adsl <- formatters::ex_adsl
+
+set_flextable_defaults(
+  border.color = "#AAAAAA",
+  font.family = "Arial",
+  font.size = 10,
+  padding = 3,
+  line_spacing = 1.4
+)
+
+# Select relevant variables for demographics
+adsl <- select(ex_adsl, AGE, SEX, COUNTRY, ARM)
+
+# Extract variable labels from attributes
+col_labels <- map_chr(adsl, function(x) attr(x, "label"))
+
+# Create summary statistics by treatment arm
+ft <- summarizor(adsl, by = "ARM") |>
+  as_flextable(
+    sep_w = 0,
+    separate_with = "variable",
+    spread_first_col = TRUE
+  ) |>
+  align(i = ~ !is.na(variable), align = "left") |>
+  prepend_chunks(i = ~ is.na(variable), j = "stat", as_chunk("\t")) |>
+  labelizor(
+    j = "stat",
+    labels = col_labels,
+    part = "all"
+  ) |>
+  autofit() |>
+  add_header_lines(
+    c(
+      "x.x: Study Subject Data",
+      "x.x.x: Demographic Characteristics",
+      "Table x.x.x.x: Demographic Characteristics - Full Analysis Set"
+    )
+  ) |>
+  add_footer_lines("Source: ADSL DDMMYYYY hh:mm; Listing x.xx; SDTM package: DDMMYYYY")
+
+ft
+```
+
+
+The `by` argument controls grouping:
+
+- `by = "ARM"`: Groups statistics by treatment arm
+- `by = NULL`: No grouping, overall statistics only
+
+### Customizing numeric statistics
+
+You can select which statistics to display for numeric variables:
+
+```{r}
+# Select specific statistics to display
+summary_custom <- summarizor(
+  adsl,
+  by = "ARM",
+  num_stats = c("range", "median_iqr")
+)
+
+as_flextable(summary_custom, spread_first_col = TRUE) |>
+  autofit() |>
+  labelizor(
+    j = "stat",
+    labels = c(
+      AGE = "Age (years)",
+      COUNTRY = "Country",
+      SEX = "Sex"
+    ),
+    part = "all"
+  )
+```
+
+Available numeric statistics:
+
+- `"mean_sd"`: Mean (Standard Deviation)
+- `"median_iqr"`: Median [Q1, Q3]
+- `"range"`: Min - Max
+
+### Understanding as_flextable() parameters for summarizor
+
+The `as_flextable()` method for summarizor data frames has specific parameters:
+
+- `spread_first_col`: When `TRUE`, spreads the grouping variable across columns instead of rows
+- `sep_w`: Width of separation space (0 = no space)
+
+```{r}
+# Compare different layouts
+summary_data <- summarizor(adsl, by = "ARM")
+
+# Layout 1: Spread groups across columns
+ft1 <- as_flextable(
+  summary_data,
+  spread_first_col = TRUE,
+  sep_w = 0
+) |>
+  autofit()
+
+ft1
+```
+
+```{r}
+# Layout 2: Groups as rows
+ft2 <- as_flextable(
+  summary_data,
+  spread_first_col = FALSE
+) |>
+  autofit() |>
+  add_header_lines("Layout 2: Groups as rows")
+
+ft2
+```
+
+## Frequency tables with table() and as_flextable()
+
+The base R `table()` function creates contingency tables that can be converted to flextables. This is useful for displaying categorical data distributions.
+
+### One-way frequency tables
+
+A one-way table shows the distribution of a single categorical variable:
+
+```{r}
+# Create a simple frequency table
+sex_table <- table(ex_adsl$SEX)
+
+# Convert to flextable
+as_flextable(sex_table) |>
+  set_header_labels(value = "Sex", stat = "Count") |>
+  autofit() |>
+  add_header_lines("Distribution by Sex")
+```
+
+### Two-way frequency tables
+
+Two-way tables show the cross-tabulation of two categorical variables:
+
+```{r}
+# Create a two-way contingency table
+sex_arm_table <- table(
+  Sex = ex_adsl$SEX,
+  Treatment = ex_adsl$ARM
+)
+
+# Convert to flextable
+as_flextable(sex_arm_table) |>
+  autofit() |>
+  add_header_lines("Sex Distribution by Treatment Arm") |>
+  align(j = 1, align = "left", part = "body") |>
+  align(j = -1, align = "center", part = "all")
+```

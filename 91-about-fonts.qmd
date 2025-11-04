@@ -1,0 +1,169 @@
+# Font Management in R
+
+{{< include _init.qmd >}}
+
+Font management is often an overlooked or neglected aspect of creating reproducible reports with R. However, it's a critical consideration when working with flextable and ggplot2, especially in pharmaceutical reporting contexts where documents must be rendered consistently across different machines and environments.
+
+## Why Font Management Matters
+
+We recommand 'ragg' and 'systemfonts' packages to manage fonts from R.
+
+When you create a ggplot2 graphic on one machine, the rendering engine needs to calculate font metrics, the precise dimensions and spacing of each character. 
+
+'flextable' may also require access to the actual font files to perform these calculations when function `autofit()` is called. Fonts used by Word tables are also needed on the machine editing the document (for Word/PowerPoint display and editing).
+
+This because flextable calculates layout during generation, but Word/PowerPoint renders text during editing.
+
+
+::: {.callout-important title="The Challenge"}
+
+A table or graphic composed on one machine must have the required fonts available on that machine. Without access to the font files, the rendering engine cannot accurately calculate character widths, line heights, and spacing, which can result in:
+
+- Misaligned columns in tables
+- Text overflow or truncation
+- Inconsistent spacing between elements
+:::
+
+This means that reproducibility isn't just about having the same R code, it also requires having the same fonts available across all machines where the documents will be generated.
+
+
+## Packages and Functions for Font Management
+
+To use a font in your graphics (or tables), it must be available on your machine. Fonts can be:
+
+1. System fonts: Installed on your operating system
+2. Downloaded fonts: Obtained from sources like Google Fonts but not necessarily installed system-wide
+
+Not all R graphics engines support all fonts equally. However, engines that use the 'systemfonts' package provide robust and easy-to-use font support.
+
+### Recommended Graphics Engines
+
+We recommend using 'ragg' that leverage 'systemfonts': see `ragg::agg_png()` and `ragg::agg_jpeg()` for high-quality raster graphics (PNG, JPEG).
+
+::: {.callout-tip title="Setting ragg as default in RStudio"}
+
+We recommend configuring `ragg::agg_png()` as the default graphics device in RStudio. This ensures consistent rendering with proper font support.
+
+To set this up:
+1. Go to **Tools > Global Options** (or **RStudio > Preferences** on Mac)
+2. Navigate to **General > Graphics**
+3. Set the backend to "AGG"
+4. Click OK to apply the changes
+
+This configuration ensures all graphics generated in your RStudio session use the ragg engine, providing consistent font rendering with full Unicode support.
+:::
+
+## Working with System Fonts
+
+You can list all fonts available on your system using `systemfonts::system_fonts()`:
+
+```{r}
+library(tidyverse)
+system_fonts_available <- systemfonts::system_fonts() |>
+  dplyr::select(-path, -index) |>
+  dplyr::arrange(family)
+
+head(system_fonts_available, 20)
+```
+
+To use a font in your visualization, reference it by the `family` name from this list:
+
+```{r}
+dat <- mtcars
+dat$carname <- row.names(dat)
+
+gg <- ggplot(dat, aes(drat, carname)) +
+  geom_point() +
+  theme_minimal(base_family = "Arial")
+gg
+```
+
+## Using Google Fonts
+
+Google Fonts (<https://fonts.google.com/>) provides a vast library of freely available fonts. The `gdtools` package makes it easy to use these fonts in R without installing them system-wide.
+
+The `gdtools::register_gfont()` function:
+
+1. Downloads the font to a user-specific directory (if not already downloaded)
+2. Registers it with 'systemfonts'
+
+Here's an example using the "Lemon" font from Google Fonts:
+
+```{r results='hide'}
+gdtools::register_gfont("Lemon")
+```
+
+```{r}
+gg_lemon <- ggplot(dat, aes(drat, carname)) +
+  geom_point() +
+  theme_minimal(base_family = "Lemon")
+gg_lemon
+```
+
+
+## Our Approach: Using Arial for Maximum Compatibility
+
+### Why We Prefer Arial
+
+Throughout this workshop, we use Arial as our standard font. This choice is deliberate and based on practical considerations:
+
+1. Universal availability: Arial is present on virtually all Windows, macOS, and can be easily deployed on Linux systems
+4. Easy to bundle: The font files can be included in your project for Linux/CI environments
+
+### How We Set Up Arial in This Book
+
+Let's examine how Arial is configured in this book's `_init.qmd` file, which is included at the beginning of every chapter:
+
+```{r eval=FALSE}
+# From _init.qmd
+
+# Check if Arial is available on the system
+if (!font_family_exists("Arial")) {
+  # If not, register it from bundled font files
+  systemfonts::register_font(
+    "Arial",
+    plain = "static/fonts/Arial.ttf",
+    bold = "static/fonts/Arial Bold.ttf",
+    italic = "static/fonts/Arial Italic.ttf",
+    bolditalic = "static/fonts/Arial Bold Italic.ttf"
+  )
+}
+
+# Set Arial as the default font for all flextables
+set_flextable_defaults(
+  font.family = "Arial",
+  font.size = 11,
+  padding = 3,
+  table.layout = "autofit"
+)
+```
+
+This approach ensures that:
+- On Windows/Mac where Arial is typically installed, the system font is used
+- On Linux or CI/CD environments, the bundled font files are used
+- All tables in the book have consistent Arial formatting
+
+### Bundling Font Files in Your Project
+
+We include Arial font files directly in the project structure:
+
+```
+r-in-pharma-book/
+├── static/
+│   └── fonts/
+│       ├── Arial.ttf
+│       ├── Arial Bold.ttf
+│       ├── Arial Italic.ttf
+│       └── Arial Bold Italic.ttf
+├── _init.qmd
+└── [other files...]
+```
+
+
+1. Font files location: The font files are stored in `static/fonts/` directory
+2. Relative paths: The `systemfonts::register_font()` call uses relative paths from the working directory (here `fonts/` which should point to `static/fonts/`)
+3. Four variants: We include all four variants (regular, bold, italic, bold-italic) to ensure complete font support
+4. Conditional registration: The `if (!font_family_exists("Arial"))` check prevents re-registering fonts that are already available system-wide
+
+
+

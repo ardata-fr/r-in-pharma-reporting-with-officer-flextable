@@ -1,0 +1,321 @@
+# Produce Word document with officer
+
+{{< include _init.qmd >}}
+
+
+```{r}
+sub_path <- file.path("output", "officer-examples")
+dir.create(sub_path, showWarnings = FALSE, recursive = TRUE)
+```
+
+## Add contents
+
+To add paragraphs of text, tables, images to a Word document, 
+you have to use one of the `body_add_*` functions:
+
+```{r echo=FALSE, results='asis'}
+body_add_funs <- ls(envir = as.environment("package:officer"), pattern = "^body_add_")
+body_add_funs <- setdiff(body_add_funs, "body_add_xml")
+body_add_funs <- paste0("`", body_add_funs, "()`")
+as_ul(body_add_funs)
+```
+
+They all have the same output and the same first argument: the R object representing 
+the Word document, these functions are all taking as first input the document that 
+needs to be filled with some R content and are all returning the document, that 
+has been augmented with the new R content(s) after the function call.
+
+```
+x <- body_add_par(x, "Level 1 title", style = "heading 1")
+```
+
+These functions are all creating one or more top level elements, either 
+paragraphs, either tables.
+
+
+
+### Paragraphs
+
+To add a text paragraph, use the `body_add_paragraph()` function. The function
+requires 3 arguments, the target document, the text to be used in the new
+paragraph, and the paragraph style to be used.
+
+
+```{r office_file = file.path(sub_path, "example_par.docx")}
+read_docx() |> 
+  body_add_par(value = "Hello World!", style = "Normal") |> 
+  body_add_par(value = "Salut Bretons!", style = "centered") |> 
+  print(target = file.path(sub_path, "example_par.docx"))
+```
+
+
+### Titles
+
+A title is a paragraph. To add a title, use `body_add_par()` with the `style` 
+argument set to the corresponding title style. 
+
+```{r office_file = file.path(sub_path, "example_titles.docx")}
+read_docx() |> 
+  body_add_par(value = "This is a title 1", style = "heading 1") |> 
+  body_add_par(value = "This is a title 2", style = "heading 2") |> 
+  body_add_par(value = "This is a title 3", style = "heading 3") |> 
+  print(target = file.path(sub_path, "example_titles.docx"))
+```
+
+
+### Tables of contents
+
+A TOC (Table of Contents) is a Word computed field, table of contents is built by Word. The
+TOC field will collect entries using heading styles or another specified style.
+
+Note: you have to update the fields with Word application to 
+reflect the correct page numbers. 
+
+Use function `body_add_toc()` to insert a TOC inside a Word document.
+
+```{r office_file = file.path(sub_path, "example_toc.docx")}
+doc_toc <- read_docx() |>
+  body_add_par("Table of Contents", style = "heading 1") |> 
+  body_add_toc(level = 2) |> 
+  body_add_par("Table of figures", style = "heading 1") |> 
+  body_add_toc(style = "Image Caption") |> 
+  body_add_par("Table of tables", style = "heading 1") |> 
+  body_add_toc(style = "Table Caption")
+
+print(doc_toc, target = file.path(sub_path, "example_toc.docx"))
+```
+
+
+### Plots from 'ggplot2'
+
+Function `body_add_gg()` is also a sugar function that wrap an image generated
+from a `ggplot` into a paragraph. 
+
+```{r}
+library(ggplot2)
+
+gg <- ggplot(data = iris, aes(Sepal.Length, Petal.Length)) + 
+  geom_point()
+
+doc_gg <- read_docx()
+doc_gg <- body_add_gg(x = doc_gg, value = gg, style = "centered")
+```
+
+The size of the Word document can be used to maximize the size of the graphic to
+be produced.
+
+```{r office_file = file.path(sub_path, "example_gg.docx")}
+word_size <- docx_dim(doc_gg)
+word_size
+width <- word_size$page['width'] - word_size$margins['left'] - word_size$margins['right']
+height <- word_size$page['height'] - word_size$margins['top'] - word_size$margins['bottom']
+
+doc_gg <- body_add_gg(x = doc_gg, value = gg, 
+                      width = width, height = height, 
+                      style = "centered")
+
+print(doc_gg, target = file.path(sub_path, "example_gg.docx"))
+```
+
+
+
+### Page breaks
+
+Page breaks are handy for formatting a Word document. They allow you to control
+where your document should move to the next page, such as at the end of a
+chapter or section.
+
+Use function `body_add_break()` to add a page break in the Word document.
+
+```{r office_file = file.path(sub_path, "example_break.docx")}
+library(ggplot2)
+library(flextable)
+
+gg <- ggplot(data = iris, aes(Sepal.Length, Petal.Length)) + 
+  geom_point()
+
+ft <- flextable(head(iris, n = 10))
+ft <- set_table_properties(ft, layout = "autofit")
+
+read_docx() |> 
+  body_add_par(value = "dataset iris", style = "heading 2") |> 
+  body_add_flextable(value = ft ) |> 
+  
+  body_add_break() |> 
+
+  body_add_par(value = "plot examples", style = "heading 2") |> 
+  body_add_gg(value = gg, style = "centered") |> 
+  
+  print(target = file.path(sub_path, "example_break.docx"))
+```
+
+
+## Understanding and Working with Styles
+
+Styles are one of the most powerful features in Microsoft Word documents. They control the appearance and formatting of content, ensuring consistency across your document and enabling features like automatic table of contents generation.
+
+### What are Styles?
+
+In Word, a style is a named collection of formatting properties that can be applied to:
+
+- **Paragraphs**: Control text alignment, spacing, indentation, borders (e.g., "Normal", "Heading 1")
+- **Characters**: Control font, size, color, bold, italic for text spans (e.g., "Strong", "Emphasis")
+- **Tables**: Control table borders, cell padding, header row formatting (e.g., "Table Grid")
+- **Lists**: Control bullet and numbering formats (e.g., "List Bullet", "List Number")
+
+The template file (specified via `path` or the default template) determines which styles are available in your document. When you use functions like `body_add_par(style = "heading 2")`, the style name must exist in the template.
+
+### Discovering Available Styles
+
+Use `styles_info()` to get a data.frame listing all available styles in your document:
+
+```{r}
+doc <- read_docx()
+styles <- styles_info(doc)
+head(styles)
+```
+
+The data.frame contains several important columns:
+
+- `style_type`: The type of style - "paragraph", "character", "table", or "list"
+- `style_id`: The unique identifier (mainly for internal use)
+- `style_name`: **The name you'll use in R functions** (e.g., "heading 1", "Normal")
+- `is_custom`: Whether it's a custom style (TRUE) or built-in (FALSE)
+- `is_default`: Whether it's the default style for its type
+
+::: {.callout-tip title="Finding the right style name"}
+Style names can vary depending on your Word language settings. For example:
+- English: "heading 1", "Normal"
+- French: "Titre 1", "Normal"
+
+Always check with `styles_info()` to confirm the exact names in your template.
+:::
+
+You can filter the styles to find specific types:
+
+```{r}
+# Find all paragraph styles
+para_styles <- styles |>
+  filter(style_type == "paragraph") |>
+  select(style_name, is_default)
+head(para_styles, 10)
+```
+
+### Using Styles in officer
+
+When adding content to a Word document, specify the style by name:
+
+```{r office_file = file.path(sub_path, "example_styles.docx")}
+doc <- read_docx() |>
+  body_add_par("This is a Heading 1", style = "heading 1") |>
+  body_add_par("This is normal body text.", style = "Normal") |>
+  body_add_par("This is a Heading 2", style = "heading 2") |>
+  body_add_par("More body text here.", style = "Normal")
+
+print(doc, target = file.path(sub_path, "example_styles.docx"))
+```
+
+### Creating Custom Styles Programmatically
+
+While you can create custom styles directly in Word templates, officer also provides functions to define styles programmatically. This is particularly useful for creating specialized styles for pharmaceutical reports.
+
+#### Creating a Custom Paragraph Style
+
+Use `docx_set_paragraph_style()` to define a new paragraph style or modify an existing one:
+
+```{r}
+# Read a template
+doc <- read_docx()
+
+# Create a custom "Table Caption" style
+doc <- docx_set_paragraph_style(
+  doc,
+  base_on = "Normal",              # Base on existing style
+  style_id = "TableCaption",       # Internal ID
+  style_name = "Table Caption",    # Name used in R
+  fp_p = fp_par(                   # Paragraph properties
+    text.align = "center",
+    padding.top = 12,
+    padding.bottom = 3
+  ),
+  fp_t = fp_text_lite(             # Text properties
+    font.family = "Arial",
+    italic = TRUE,
+    font.size = 11,
+    color = "#333333"
+  )
+)
+```
+
+**Key parameters:**
+
+- `base_on`: Name of an existing style to inherit from
+- `style_id`: Unique identifier for the style (used internally)
+- `style_name`: Display name used when calling the style in R
+- `fp_p`: Paragraph formatting properties (see `?fp_par`)
+- `fp_t`: Text formatting properties (see `?fp_text_lite`)
+
+#### Creating Multiple Custom Styles
+
+Here's an example creating styles for captions and graphics:
+
+```{r}
+doc <- read_docx()
+
+# Style for table captions
+doc <- docx_set_paragraph_style(
+  doc,
+  base_on = "Normal",
+  style_id = "TableCaption",
+  style_name = "Table Caption",
+  fp_p = fp_par(text.align = "center", padding.top = 12, padding.bottom = 3),
+  fp_t = fp_text_lite(font.family = "Arial", italic = TRUE,
+                      font.size = 11, color = "#333333")
+)
+
+# Style for figure captions
+doc <- docx_set_paragraph_style(
+  doc,
+  base_on = "Normal",
+  style_id = "ImageCaption",
+  style_name = "Image Caption",
+  fp_p = fp_par(text.align = "center", padding.top = 3, padding.bottom = 12),
+  fp_t = fp_text_lite(font.family = "Arial", italic = TRUE,
+                      font.size = 11, color = "#333333")
+)
+
+# Style for centered graphics
+doc <- docx_set_paragraph_style(
+  doc,
+  base_on = "Normal",
+  style_id = "Graphic",
+  style_name = "Graphic",
+  fp_p = fp_par(text.align = "center", padding.top = 3, padding.bottom = 3)
+)
+
+# Verify the styles were created
+styles_info(doc) |>
+  filter(style_name %in% c("Table Caption", "Image Caption", "Graphic")) |>
+  select(style_name, style_type, is_custom)
+```
+
+Now you can use these custom styles throughout your document:
+
+```{r eval=FALSE}
+doc <- doc |>
+  body_add_par("Table 1: Patient Demographics", style = "Table Caption") |>
+  body_add_flextable(my_table) |>
+  body_add_par("Figure 1: Kaplan-Meier Curves", style = "Image Caption") |>
+  body_add_gg(my_plot, style = "Graphic")
+```
+
+### The Document Layout
+
+Beyond individual styles, the overall document layout (page size, margins, header and footer content, orientation) also comes from the template. You can modify these settings using:
+
+- `body_set_default_section()`: Set default page layout for the entire document
+- `body_end_block_section()` add a section break
+
+This allows you to create documents with mixed orientations (e.g., portrait pages for text, landscape pages for wide tables) or different margins for different sections.
+
+This will be explained in the section @sec-sections.

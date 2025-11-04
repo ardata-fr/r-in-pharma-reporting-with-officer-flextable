@@ -1,0 +1,353 @@
+# Building an Adverse Event Table
+
+{{< include _init.qmd >}}
+
+Adverse Event (AE) tables present the safety profile of investigational treatments 
+by summarizing the adverse events experienced by participants during a clinical trial.
+
+A well-constructed AE table typically presents multiple levels of aggregation simultaneously:
+
+- Overall adverse event rates (any AE)
+- System Organ Class (SOC) level summaries
+- Preferred Term (PT) level details within each SOC
+
+This hierarchical presentation allows clinicians and regulators to quickly assess 
+both the overall safety profile and drill down into specific types of adverse events.
+
+## Data Pre-processing
+
+The first step in creating an AE table is to prepare our data sources. We'll work 
+with two standard CDISC datasets (available from package 'pharmaverseadam'):
+
+- `adsl`: Subject-Level Analysis Dataset containing demographic and disposition information
+- `adae`: Adverse Events Analysis Dataset containing all reported adverse events
+
+```{r}
+# Load example datasets
+adsl <- pharmaverseadam::adsl
+adae <- pharmaverseadam::adae
+
+adae <- adae |>
+  dplyr::filter(
+    # safety population
+    SAFFL == "Y"
+  )
+adae
+```
+
+::: {.callout-tip title="Why filter by SAFFL == Y?"}
+ 
+In clinical trials, the safety population typically includes all subjects who received at least one dose of study medication. The Safety Flag (`SAFFL`) identifies these subjects, ensuring we analyze only relevant safety data.
+
+:::
+
+### Calculating Treatment Group Denominators
+
+For percentage calculations, we need to know the total number of subjects in each treatment arm. This denominator is crucial for interpreting adverse event rates.
+
+```{r}
+CT_ARM <- adsl |>
+  semi_join(adae, by = "ARM") |>
+  count(ARM, name = "denom")
+CT_ARM
+```
+
+The `semi_join()` ensures we count only subjects who are in both datasets and meet our safety population criteria.
+
+## Building a Hierarchical Structure
+
+The key to creating a professional AE table is to construct multiple levels of aggregation and then stack them together into a single dataset. This technique, often called **stacking** or **layering**, allows us to present summary statistics at different hierarchical levels within one cohesive table.
+
+We'll build three separate aggregation levels, each progressively more detailed:
+
+### Level 3: Preferred Term (Most Detailed)
+
+The finest level of detail shows individual adverse event terms (Preferred Terms or PTs) within each System Organ Class. This is where we see specific conditions like "Headache" or "Nausea".
+
+```{r}
+AE_TABLE_LEV2 <- adae |>
+  group_by(ARM, AESOC, AEDECOD) |>
+  summarise(
+    n = n_distinct(USUBJID),
+    .groups = "drop"
+  ) |>
+  arrange(AESOC, AEDECOD, ARM) |>
+  tibble::add_column(agg_level = 2L)
+AE_TABLE_LEV2
+```
+
+::: {.callout-note}
+
+- We use `n_distinct(USUBJID)` to count unique subjects, not total events (a subject experiencing the same AE multiple times counts once)
+- The `agg_level = 2L` marker identifies this as the most detailed level
+- We group by `ARM` (treatment), `AESOC` (System Organ Class), and `AEDECOD` (Preferred Term)
+
+:::
+
+
+### Level 2: System Organ Class (Intermediate)
+
+The middle level aggregates all events within each body system category (e.g., "Gastrointestinal disorders", "Nervous system disorders"). It provides a summary view of which body systems are most affected.
+
+```{r}
+AE_TABLE_LEV1 <- adae |>
+  group_by(ARM, AESOC) |>
+  summarise(
+    n = n_distinct(USUBJID),
+    .groups = "drop"
+  ) |>
+  arrange(AESOC, ARM) |>
+  tibble::add_column(agg_level = 1L)
+AE_TABLE_LEV1
+```
+
+
+### Level 1: Overall Summary (Highest Level)
+
+The top level shows the broadest view: how many subjects experienced any adverse event at all, regardless of type.
+
+```{r}
+AE_TABLE_LEV0 <- adae |>
+  group_by(ARM) |>
+  summarise(
+    n = n_distinct(USUBJID)
+  ) |>
+  arrange(ARM) |>
+  tibble::add_column(agg_level = 0L, AESOC = "ANY ADVERSE EVENTS")
+AE_TABLE_LEV0
+```
+
+### Stacking the Layers: Combining All Levels
+
+Now comes the crucial step: we **stack** (vertically combine) all three aggregation levels into a single dataset. This stacking technique creates a hierarchical structure that will translate directly into the visual hierarchy of our final table.
+
+```{r}
+AE_TABLE <- bind_rows(AE_TABLE_LEV0, AE_TABLE_LEV1, AE_TABLE_LEV2) |>
+  left_join(CT_ARM, by = "ARM") |>
+  mutate(
+    pct = n / denom,
+    denom = NULL,
+    first_level = is.na(AEDECOD)
+  ) |>
+  arrange(AESOC, agg_level, first_level, AEDECOD, ARM) |>
+  mutate(
+    LABEL = coalesce(AEDECOD, AESOC),
+    LABEL = factor(LABEL, levels = unique(LABEL)),
+    stat_str = fmt_n_percent(n, pct, digit = 1)
+  )
+AE_TABLE
+```
+
+By stacking these levels together, we've created a single dataset that contains all the information needed for our table, with a structure that naturally reflects the hierarchical organization we want to display. Each row knows its level in the hierarchy (`agg_level`) and can be formatted appropriately.
+
+::: {.callout-note}
+
+1. `bind_rows(AE_TABLE_LEV0, AE_TABLE_LEV1, AE_TABLE_LEV2)`: Vertically stacks all three levels, preserving the structure of each. Rows from `AE_TABLE_LEV0` appear first, followed by `AE_TABLE_LEV1`, then `AE_TABLE_LEV2`.
+
+2. `left_join(CT_ARM, by = "ARM")`: Adds the denominator for each treatment arm, enabling percentage calculations.
+
+3. `mutate(pct = n / denom)`: Calculates the percentage of subjects experiencing each event. This is critical for clinical interpretation—raw counts alone can be misleading if treatment groups have different sizes.
+
+4. `first_level = is.na(AEDECOD)`: Creates a flag to identify SOC-level rows (which lack a Preferred Term). This will help with formatting later.
+
+5. `arrange(AESOC, agg_level, first_level, AEDECOD, ARM)`: Carefully orders the data so that:
+   - Events are grouped by System Organ Class
+   - Within each SOC, the summary appears first (lower `agg_level`)
+   - Then individual Preferred Terms follow
+   - Treatment arms stay together for each term
+
+6. `LABEL = coalesce(AEDECOD, AESOC)`: Creates a display label that shows the Preferred Term when available, otherwise shows the System Organ Class. This unified label column simplifies table creation.
+
+7. `stat_str = fmt_n_percent(n, pct, digit = 1)`: Formats the count and percentage into a standard clinical reporting format (e.g., "15 (23.4%)").
+
+:::
+
+```{r include=FALSE}
+arrow::write_parquet(AE_TABLE, here("data", "AE-TABLE.parquet"))
+arrow::write_parquet(CT_ARM, here("data", "CT-ARM.parquet"))
+```
+
+
+## Creating the Flextable
+
+Now that we have our stacked hierarchical dataset, we need to transform it into a presentation-ready table. This involves two key steps: reshaping the data from long to wide format, and then applying sophisticated formatting with flextable.
+
+### Pivoting from Long to Wide Format
+
+Our current dataset has one row per treatment arm per adverse event, which is ideal for data manipulation but not for presentation. We need to pivot it so that treatment arms become columns, creating the familiar clinical trial table layout.
+
+For this example, we'll work with a subset of the data to keep things manageable during the workshop:
+
+```{r}
+AE_TABLE_SAMPLE <- AE_TABLE |>
+  filter(
+    AESOC %in% c(
+      "ANY ADVERSE EVENTS",
+      "CARDIAC DISORDERS",
+      "GASTROINTESTINAL DISORDERS"
+    )
+  )
+
+x <- select(AE_TABLE_SAMPLE, LABEL, AESOC, AEDECOD, ARM, agg_level, stat_str) |>
+  tidyr::pivot_wider(
+    names_from = "ARM",
+    values_from = c("stat_str"),
+    values_fill = "0 (0%)"
+  )
+x
+```
+
+**Understanding the pivot:**
+
+- `names_from = "ARM"`: Treatment arms become column names
+- `values_from = "stat_str"`: The formatted statistics (n, %) populate the cells
+- `values_fill = "0 (0%)"`: When no subjects experienced a particular AE in a treatment arm, we display "0 (0%)" rather than leaving the cell empty
+
+Notice that we keep `AESOC`, `AEDECOD`, and `agg_level` in the dataset even though they're not displayed columns. These metadata columns will help us apply conditional formatting later.
+
+
+### Setting Global Formatting Standards
+
+Before we create the table, let's establish formatting defaults that align with our standards:
+
+```{r}
+set_flextable_defaults(
+  font.family = "Arial",
+  font.size = 11,
+  padding = 5,
+  table.layout = "autofit"
+)
+```
+
+### Building the Base Table with Visual Hierarchy
+
+The first step in creating our flextable is to establish the basic structure and create visual hierarchy through indentation:
+
+```{r}
+ft <- x |>
+  flextable(col_keys = c("LABEL", CT_ARM$ARM)) |>
+  # Indent sub-level items
+    prepend_chunks(
+      j = "LABEL",
+      i = ~ agg_level == 2,
+      as_chunk("\t")
+    ) |> 
+  add_header_lines("Table 15.3: 1 AE by SOC/PT") |>
+  add_footer_lines(as_paragraph(as_sup("(1)"), " n (%)")) |>
+  set_table_properties(layout = "fixed") |>
+  width(width = 1) |>
+  width(width = 2, j = 1)
+ft
+```
+
+::: {.callout-tip title="Breaking down each formatting choice"}
+
+1. `col_keys = c("LABEL", CT_ARM$ARM)`: Specifies exactly which columns to display. We show the LABEL column first, followed by each treatment arm. This hides the metadata columns (`AESOC`, `AEDECOD`, `agg_level`) that we kept for conditional formatting.
+
+2. `padding(j = "LABEL", i = ~ agg_level == 2, padding.left = 12)`: Creates visual hierarchy by indenting Preferred Terms (level 2). This immediately shows readers which rows are detailed terms versus summary categories. The `~` syntax allows us to use a formula to conditionally apply formatting.
+
+3. `add_header_lines("Table 15.3: 1 AE by SOC/PT")`: Adds a title row that spans all columns. This follows standard pharmaceutical numbering conventions for tables.
+
+4. `add_footer_lines(as_paragraph(as_sup("(1)"), " n (%)"))`: Adds a footnote explaining the data format, with superscript notation linking to the column headers we'll add next.
+
+5. `set_table_properties(layout = "fixed")`: Fixes column widths so the table doesn't expand/contract in different contexts. This ensures consistency when the document is viewed in different Word versions or settings.
+
+6. `width(width = 1)` and `width(width = 2, j = 1)`: Sets column widths in inches. Treatment arm columns get 1 inch each, while the LABEL column gets 2 inches to accommodate longer adverse event terms.
+
+:::
+
+### Adding Sample Size Information to Headers
+
+In clinical tables, it's important to display the number of subjects in each treatment arm. This context allows readers to properly interpret the percentages and assess the reliability of the data:
+
+```{r}
+ft <- ft |>
+  append_chunks(
+    i = 1, j = -1, part = "header",
+    as_sup(" (1)")
+  ) |>
+  append_chunks(
+    i = 1, j = -1, part = "header",
+    as_chunk(fmt_header_n(CT_ARM$denom, newline = TRUE))
+  )
+ft
+```
+
+::: {.callout-important title="Understanding chunk composition"}
+
+The `append_chunks()` function allows us to build complex cell content by appending text chunks with different formatting.
+
+1. First `append_chunks()` call: Adds a superscript "(1)" to all treatment arm columns (`j = -1` means "all columns except the first"). This superscript links to the footer note explaining the data format.
+
+2. Second `append_chunks()` call: Adds the sample size for each treatment arm on a new line. The `fmt_header_n()` function formats the denominators in parentheses, creating headers like:
+
+```
+Placebo
+(N=86)
+```
+
+:::
+
+### Applying Labels and Formatting
+
+The final step is to replace technical variable names with reader-friendly labels and apply alignment conventions:
+
+```{r}
+ft <- ft |>
+  labelizor(
+    labels = c(LABEL = "", unlist(labelled::var_label(adae))),
+    j = "LABEL"
+  ) |>
+  labelizor(
+    labels = stringr::str_to_sentence,
+    j = "LABEL"
+  ) |>
+  mk_par(
+    i = 1, j = 1, part = "header",
+    as_paragraph(
+      labelled::get_variable_labels(adae)$AESOC,
+      "\n\t",
+      labelled::get_variable_labels(adae)$AEDECOD
+    )
+  ) |>
+  align(j = -1, align = "right", part = "all")
+ft
+```
+
+::: {.callout-important title="Understanding the labeling process"}
+
+1. First `labelizor()` call: Replaces column headers using the variable labels stored in the CDISC dataset metadata. The `c(LABEL = "", ...)` syntax sets the LABEL column header to empty, then uses the actual variable labels from `adae` for any matching column names.
+
+2. Second `labelizor()` call: Applies sentence case formatting to labels using `stringr::str_to_sentence`. This converts labels like "CARDIAC DISORDERS" to "Cardiac disorders".
+
+3. `mk_par()` for the first header cell: Creates a more informative header for the LABEL column by combining two pieces of information:
+   - The SOC label ("System Organ Class")
+   - The PT label ("Dictionary-Derived Term")
+
+   The `\n\t` creates a new line with a tab, visually organizing the two-level hierarchy even in the header.
+
+::: 
+
+### Save in a Word document
+
+We now have a publication-ready Adverse Event table that:
+
+- Presents three levels of aggregation in a single view
+- Uses visual hierarchy (indentation) to show relationships
+- Includes sample sizes for proper interpretation
+- Follows defined formatting standards
+
+This table is ready to be included in a Word document.
+
+
+```{r}
+sub_path <- file.path("output", "ae-table", "flextable-ae-first")
+dir.create(sub_path, showWarnings = FALSE, recursive = TRUE)
+out_path <- file.path(sub_path, "AE-TABLE.docx")
+```
+
+```{r office_file = out_path}
+save_as_docx(ft, path = out_path)
+```
+
+

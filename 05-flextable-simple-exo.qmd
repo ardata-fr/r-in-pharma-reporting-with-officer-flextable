@@ -1,0 +1,141 @@
+# Building a Cancer Statistics Table
+
+{{< include _init.qmd >}}
+
+In this section, we will work with a dataset from <https://data.ameli.fr/pages/data-pathologies/> that presents cancer statistics from 2021. This hands-on example will guide you through the process of building a well-formatted table step by step.
+
+Our goal is to create a professional-looking table that presents cancer data clearly and follows best practices for table formatting. We'll build this table iteratively, adding formatting improvements at each stage so you can understand how each function contributes to the final result.
+
+## Loading and preparing the data
+
+The first step in any table creation process is to load and prepare your data. In this case, we're working with cancer statistics stored in a Parquet file format, which is efficient for storing tabular data.
+
+We'll load the data and sort it by the number of cases (`effectif`) in descending order. This sorting is important because it will help readers quickly identify which cancer types affect the most patients.
+
+You can download the parquet file by clicking on the following link: [data/cancers-2021.parquet](data/cancers-2021.parquet).
+
+```{r}
+library(dplyr)
+cancers <- arrow::read_parquet("data/cancers-2021.parquet") |>
+  arrange(desc(effectif))
+cancers
+```
+
+## Goal
+
+Through this step-by-step process, we are going to transform raw data into a table that:
+
+- Presents only relevant information
+- Uses appropriate numeric formatting
+- Includes clear, descriptive headers
+- Provides necessary context and explanations
+
+This iterative approach demonstrates how flextable's functions work together to create sophisticated tables. Each function adds a specific enhancement, making it easy to modify and maintain your table-creation code.
+
+## Steps 
+
+### Setting global table defaults
+
+Before we start creating our table, it's good practice to set up global defaults for all flextable objects. This approach ensures consistency across all tables in your document and reduces repetitive code.
+
+The `set_flextable_defaults()` function allows us to specify formatting preferences that will apply to all subsequent flextables. Here, we're configuring three important aspects:
+
+- Font family: We choose "Arial" for professional appearance and readability
+- Thousands separator: We use a space (" ") to make large numbers easier to read (e.g., 10 000 instead of 10000)
+- Decimal separator: We set the comma (",") as the decimal mark, following French conventions
+- Table layout: We automatically apply a fix size layout to all tables
+- Post-processing: We automatically apply `autofit()` to all tables to optimize column widths
+
+```{r}
+set_flextable_defaults(
+  font.family = "Arial",
+  big.mark = " ",
+  decimal.mark = ",",
+  table.layout = "fixed",
+  post_process_all = function(z) {
+    autofit(z)
+  }
+)
+```
+
+Let's create a basic flextable to see how these defaults are applied:
+
+```{r echo=TRUE}
+flextable(cancers)
+```
+
+You can see that the table already uses our specified font and number formatting, even though we haven't explicitly applied these settings to this particular table.
+
+### Selecting columns to display
+
+Not all columns in your dataset need to be displayed in the final table. The `col_keys` argument in the `flextable()` function gives us precise control over which columns appear and in what order.
+
+In our case, we want to display only three columns:
+- `name`: The type of cancer
+- `prevalence`: The prevalence rate
+- `effectif`: The number of cases
+
+By specifying these columns explicitly, we create a focused table that presents only the most relevant information to our readers.
+
+```{r}
+ft <- flextable(cancers, col_keys = c("name", "prevalence", "effectif"))
+ft
+```
+
+Notice how the table now shows only our selected columns, while the underlying data remains unchanged. This is a powerful feature that allows you to present different views of your data without modifying it.
+
+### Formatting numeric content
+
+Raw numbers often need formatting to be interpretable and meaningful. The `colformat_double()` function provides sophisticated control over how numeric values are displayed.
+
+Let's apply appropriate formatting to each numeric column:
+
+For the `effectif` column (number of cases): since we're counting patients, fractional values don't make sense. We set `digits = 0` to display whole numbers only. This makes the data clearer and more accurate.
+
+For the `prevalence` column (prevalence rate): prevalence is typically expressed as a percentage with moderate precision. We set `digits = 2` to show two decimal places, providing enough detail without overwhelming the reader. We also add the suffix " %" to make it immediately clear that these are percentage values.
+
+```{r}
+ft <- ft |>
+  colformat_double(digits = 0, j = "effectif") |>
+  colformat_double(digits = 2, j = "prevalence", suffix = " %")
+ft
+```
+
+### Enhancing headers and adding context
+
+A well-designed table includes clear headers that explain what each column represents, as well as contextual information that helps readers interpret the data correctly.
+
+Setting descriptive column labels: we use `set_header_labels()` to replace technical column names with reader-friendly labels. 
+
+Adding contextual header rows: the `add_header_lines()` function with `top = TRUE` adds rows above the existing header. This is perfect for providing context about the data source and scope. In our case, we're adding:
+- A title row: "Cancers"
+- A descriptive subtitle: "Count | in France | all ages | all genders | 2021"
+
+Finally, we use `add_footer_lines()` to add a note at the bottom of the table that explains what the counts represent. 
+
+```{r}
+ft <- ft |>
+  set_header_labels(name = "", prevalence = "Prevalence", effectif = "Number of cases") |>
+  add_header_lines(c("Cancers", "Count | in France | all ages | all genders | 2021"),
+                   top = TRUE) |>
+  add_footer_lines("The counts represent the number of patients treated for each pathology (or chronic treatment or episode of care) in the group.")
+ft
+```
+
+### Applying final visual polish
+
+The last step is to apply visual styling that makes the table both attractive and easy to read. Let's apply three finishing touches:
+
+- Applying a theme: the `theme_vanilla()` function applies a clean, professional style with subtle horizontal lines between rows. This theme is particularly well-suited for scientific and medical publications because it emphasizes content over decoration.
+- Emphasizing the footer: we use `italic()` with `part = "footer"` to italicize the footer text. This visual distinction helps readers recognize that the footer contains explanatory notes rather than data, following established conventions in scientific publishing.
+- Optimizing column widths: the `autofit()` function automatically adjusts column widths to fit their content. This eliminates unnecessary white space and ensures that all text is fully visible without wrapping. Note that since we already set this as a global default earlier, this call is technically redundant here, but it's shown explicitly for pedagogical purposes.
+
+```{r}
+ft <- ft |>
+  theme_vanilla() |>
+  italic(italic = TRUE, part = "footer") |>
+  autofit()
+ft
+```
+
+

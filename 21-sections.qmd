@@ -1,0 +1,259 @@
+# Managing Sections {#sec-sections}
+
+{{< include _init.qmd >}}
+
+
+```{r}
+sub_path <- file.path("output", "officer-sections")
+dir.create(sub_path, showWarnings = FALSE, recursive = TRUE)
+```
+
+
+## Understanding Word Sections
+
+By default, the layout options of a Word file (orientation, margins, column organization, headers and footers, etc.) affect all pages of a document.
+
+However, you may need to combine several different layouts within the same document. For example:
+- Portrait pages for text content, landscape pages for wide tables
+- Different headers/footers for different chapters
+- Multi-column layouts for specific sections
+
+To achieve this complex layout, Word provides sections. These are large sets of pages that occupy the highest hierarchical level in document organization, allowing you to define specific layout parameters for distinct parts of your document.
+
+### What is a Section?
+
+A section is a grouping of blocks (paragraphs and tables) that have a set of properties defining how pages will appear. Section properties store information about:
+
+- Page size and orientation
+- Page margins
+- Number of columns
+- Headers and footers
+
+::: {.callout-important title="How Sections Work"}
+
+A section affects **preceding** paragraphs or tables:
+
+- A section starts at the end of the previous section (or the beginning of the document if no preceding section exists)
+- It stops where the section break is declared
+
+This means when you add a section break, you're defining the properties for the content that came **before** the break, not after it.
+
+:::
+
+## Critical Best Practice: Consistent Margins and Page Sizes
+
+::: {.callout-warning title="Avoid Unwanted Page Breaks"}
+
+When creating multiple sections in a document, it is strongly recommended to use the same `page_mar()` object and same `page_size()` object for all sections to avoid unwanted page breaks.
+
+Changing page margins or page sizes between sections can cause Word to insert automatic page breaks, even when using `type = "continuous"`. This can result in unwanted blank pages.
+
+Best practice: Create single `page_mar()` and `page_size()` objects at the start of your script and reuse them across all `prop_section()` calls.
+:::
+
+Here's the correct pattern demonstrated in our patient profile reports:
+
+```r
+# Define margins and sizes ONCE at the beginning
+std_margins <- page_mar(top = 1, bottom = 1, left = 1, right = 1)
+portrait_size <- page_size(orient = "portrait")
+landscape_size <- page_size(orient = "landscape")
+
+# Reuse these objects in ALL section definitions
+sect_portrait <- prop_section(
+  page_size = portrait_size,
+  page_margins = std_margins,  # Same margins
+  type = "oddPage"
+)
+
+sect_landscape <- prop_section(
+  page_size = landscape_size,
+  page_margins = std_margins,  # Same margins
+  type = "oddPage"
+)
+```
+
+## Adding Sections to a Document
+
+To format content in a section, use the `body_end_block_section()` function. This function takes a `block_section` object, which in turn wraps a `prop_section` object that defines the section properties.
+
+### Basic Example: Landscape Page for a Wide Graphic
+
+Let's create a document with a graphic on a landscape page:
+
+```{r}
+library(ggplot2)
+
+gg <- ggplot(data = iris, aes(Sepal.Length, Petal.Length)) +
+  geom_point()
+
+# Define consistent margins
+std_margins <- page_mar(top = 1, bottom = 1, left = 1, right = 1)
+
+# Start document and add graphic
+doc_section_1 <- read_docx()
+doc_section_1 <- body_add_gg(
+  x = doc_section_1, value = gg,
+  width = 9, height = 6,
+  style = "centered"
+)
+
+# Add section break to make previous content landscape
+ps <- prop_section(
+  page_size = page_size(orient = "landscape"),
+  page_margins = std_margins,  # Use consistent margins
+  type = "continuous"
+)
+
+doc_section_1 <- body_end_block_section(
+  x = doc_section_1,
+  value = block_section(property = ps)
+)
+```
+
+Now add more content that will be in the default (portrait) section:
+
+```{r office_file = file.path(sub_path, "example_landscape_gg.docx")}
+doc_section_1 <- body_add_gg(
+  x = doc_section_1, value = gg,
+  width = 6.29, height = 9.72,
+  style = "centered"
+)
+
+print(doc_section_1, target = file.path(sub_path, "example_landscape_gg.docx"))
+```
+
+## Section Properties
+
+Section properties are defined with the `prop_section()` function with these key arguments:
+
+### `page_size`
+
+Page dimensions defined with `page_size()`. Common uses:
+```r
+page_size(orient = "portrait")   # Default
+page_size(orient = "landscape")  # For wide tables
+```
+
+### `page_margins`
+
+Page margins defined with `page_mar()`. Critical: Use the same object across all sections!
+
+```r
+std_margins <- page_mar(top = 1, bottom = 1, left = 1, right = 1)
+```
+
+### `type`
+
+Section type defining how content is placed relative to the previous section:
+
+- `"continuous"`: Begins on the next paragraph (no page break)
+- `"nextPage"`: Begins on the following page
+- `"oddPage"`: Begins on the next odd-numbered page
+- `"evenPage"`: Begins on the next even-numbered page
+- `"nextColumn"`: Begins on the next column
+
+::: {.callout-tip title="When to use each type"}
+
+- `"continuous"`: Most common; keeps content flowing without forced page breaks
+- `"oddPage"` / `"evenPage"`: Useful for chapters that must start on odd/even pages
+- `"nextPage"`: Simple page break behavior
+:::
+
+### `section_columns`
+
+Column configuration defined with `section_columns()`:
+
+```r
+section_columns(widths = c(4, 4))  # Two equal columns
+```
+
+### Headers and Footers
+
+Each section can have its own headers and footers:
+
+- `header_default`, `header_even`, `header_first`
+- `footer_default`, `footer_even`, `footer_first`
+
+## The Sequential Section Pattern
+
+The standard approach for managing sections uses a sequential bracketing pattern:
+
+1. Add content for the default section
+2. Close the default section with a continuous section break
+3. Add content for the special section (e.g., landscape)
+4. Close the special section with a section break defining its properties
+5. Continue with default section content
+
+Let's illustrate with a graphic that needs landscape orientation:
+
+```{r office_file = file.path(sub_path, "example_landscape_gg2.docx")}
+# Define consistent properties
+std_margins <- page_mar(top = 1, bottom = 1, left = 1, right = 1)
+
+portrait_props <- prop_section(
+  page_size = page_size(orient = "portrait"),
+  page_margins = std_margins,
+  type = "continuous"
+)
+
+landscape_props <- prop_section(
+  page_size = page_size(orient = "landscape"),
+  page_margins = std_margins,  # Same margins!
+  type = "continuous"
+)
+
+doc_section_2 <- read_docx() |>
+  # 1. Add portrait content
+  body_add_par("This is a dummy text. It is in the default portrait section.") |>
+
+  # 2. Close default section (starts special section)
+  body_end_block_section(block_section(portrait_props)) |>
+
+  # 3. Add landscape content
+  body_add_gg(value = gg, width = 9, height = 6, style = "centered") |>
+
+  # 4. Close landscape section (returns to default)
+  body_end_block_section(block_section(landscape_props))
+
+print(doc_section_2, target = file.path(sub_path, "example_landscape_gg2.docx"))
+```
+
+
+## Complex Example: Multiple Columns
+
+Let's create a document with a table in landscape, followed by text in two columns (also landscape):
+
+```{r office_file = file.path(sub_path, "example_complex_section.docx")}
+# Consistent margins
+std_margins <- page_mar(top = 1, bottom = 1, left = 1, right = 1)
+
+# Landscape, single column
+landscape_one_column <- block_section(
+  prop_section(
+    page_size = page_size(orient = "landscape"),
+    page_margins = std_margins,
+    type = "continuous"
+  )
+)
+
+# Landscape, two columns
+landscape_two_columns <- block_section(
+  prop_section(
+    page_size = page_size(orient = "landscape"),
+    page_margins = std_margins,  # Same margins!
+    type = "continuous",
+    section_columns = section_columns(widths = c(4, 4))
+  )
+)
+
+doc_section_3 <- read_docx() |>
+  body_add_table(value = head(mtcars), style = "table_template") |>
+  body_end_block_section(value = landscape_one_column) |>
+  body_add_par(value = paste(rep(letters, 60), collapse = " ")) |>
+  body_end_block_section(value = landscape_two_columns)
+
+print(doc_section_3, target = file.path(sub_path, "example_complex_section.docx"))
+```
+
+

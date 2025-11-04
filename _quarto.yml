@@ -1,0 +1,46 @@
+project:
+  type: book
+  resources: ['output', 'data']
+
+book:
+  search:
+    location: sidebar
+    type: overlay
+  sidebar:
+    footer: |
+      authored by [![](static/img/ardata-logo.png){fig-alt="ArData" width=70px}](https://www.ardata.fr/)
+  favicon: static/img/favicon-32x32.png
+  title: "Pharmaceutical Reporting Automation with officer and flextable"
+  author: ArData
+  date: '2025-11-04'
+  chapters:
+    - index.qmd
+    - 01-intro-flextable.qmd
+    - 05-flextable-simple-exo.qmd
+    - 07-flextable-AE.qmd
+    - 11-intro-officer.qmd
+    - 13-demo-officer.qmd
+    - 21-sections.qmd
+    - 23-demo-officer-sections.qmd
+    - 31-paginate.qmd
+  appendices:
+    - 91-about-fonts.qmd
+    - 03-as_flextable.qmd
+
+citeproc: true
+link-citations: true
+format:
+  html:
+    theme: cosmo
+    css:
+    - static/css/arial.css
+    code-link: true
+    toc: true
+    toc-expand: true
+    toc-depth: 4
+    number-sections: true
+    code-fold: show
+    code-copy: true
+    highlight-style: kate
+editor: source
+pdf-engine: xelatex

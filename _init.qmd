@@ -1,0 +1,103 @@
+```{r include=FALSE}
+
+library(tidyverse)
+library(arrow)
+library(conflicted)
+library(knitr)
+library(doconv)
+library(here)
+library(knitr)
+
+library(gdtools)
+library(gfonts)
+library(ggplot2)
+library(systemfonts)
+library(ragg)
+
+library(officer)
+library(flextable)
+
+library(labelled)
+library(formatters)
+library(palmerpenguins)
+library(pharmaverseadam)
+
+as_ul <- function(x, indent = 0) {
+  indent_chr <- paste(rep(" ", indent), collapse = "")
+  LIs <- vapply(x, function(x) paste0(indent_chr, "* ", x), FUN.VALUE = "")
+  LIs <- paste0(LIs, collapse = "\n")
+  cat("\n", LIs, "\n", sep = "")
+}
+
+gdtools::register_gfont("Open Sans")
+
+opts_chunk$set(ft.tabcolsep = 2)
+
+if (!font_family_exists("Arial")) {
+  systemfonts::register_font(
+    "Arial",
+    plain = "static/fonts/Arial.ttf",
+    bold = "static/fonts/Arial Bold.ttf",
+    italic = "static/fonts/Arial Italic.ttf",
+    bolditalic = "static/fonts/Arial Bold Italic.ttf"
+  )
+}
+
+set_flextable_defaults(
+  font.family = "Arial",
+  font.size = 11,
+  padding = 3,
+  table.layout = "autofit",
+  digits = 2
+)
+
+theme_set(
+  theme_minimal(
+    base_family = "Arial"
+  )
+)
+
+conflicts_prefer(dplyr::select)
+conflicts_prefer(dplyr::filter)
+conflicts_prefer(dplyr::lag)
+conflicts_prefer(purrr::compose)
+conflicts_prefer(palmerpenguins::penguins)
+
+opts_chunk$set(
+  dev = "ragg_png",
+  dpi = 150,
+  dev.args = list(
+    background = "transparent",
+    pointsize = 11
+  )
+)
+
+process_link_preview_options  <- function(options){
+  if(!is_truthy(options$office_file)) return("")
+  lnk_code <- sprintf("\n\nClick to download [%s](%s).\n\n", options$office_file, options$office_file)
+  return(lnk_code)
+}
+
+is_truthy <- function(x) {
+  if (inherits(x, "try-error")) 
+    return(FALSE)
+  if (!is.atomic(x)) 
+    return(TRUE)
+  if (is.null(x)) 
+    return(FALSE)
+  if (length(x) == 0) 
+    return(FALSE)
+  if (all(is.na(x))) 
+    return(FALSE)
+  if (is.character(x) && !any(nzchar(stats::na.omit(x)))) 
+    return(FALSE)
+  if (is.logical(x) && !any(stats::na.omit(x))) 
+    return(FALSE)
+  return(TRUE)
+}
+knit_hooks$set(office_file = function(before, options, envir) {
+  if (!before && is_truthy(options$office_file)){
+    return(process_link_preview_options(options))
+  }
+})
+```

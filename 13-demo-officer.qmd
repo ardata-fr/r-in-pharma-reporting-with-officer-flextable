@@ -1,0 +1,542 @@
+# Patient Report with officer, ggplot2 and flextable
+
+{{< include _init.qmd >}}
+
+This chapter demonstrates a complete end-to-end workflow for creating patient profile reports using officer, flextable, and ggplot2. We'll work with clinical trial data (CDISC ADaM datasets) to create individualized patient reports that combine tables and graphics.
+
+## Overview of the Workflow
+
+We'll build patient reports that include:
+
+1. Subject-level demographics table, a basic patient information
+2. Vital signs visualization, time series plots showing metabolic measurements
+3. Vital signs summary table, a tabular summary of measurements by visit
+
+Each patient will get their own Word document with a consistent structure and formatting.
+
+## Enriching the Template with Custom Styles
+
+Before generating reports, we'll create custom paragraph styles that will be used throughout our documents. These styles ensure consistency and make it easy to apply formatting.
+
+We'll create three specialized styles:
+- "Table Caption": For table titles (centered, italic)
+- "Image Caption": For figure titles (centered, italic)
+- "Graphic": For centering graphics
+
+::: {.callout-note title="Why create styles programmatically?"}
+While you could create these styles manually in Word, defining them programmatically ensures:
+- Reproducibility: Every report uses identical styling
+- Version control: Style definitions are tracked in your R code
+- Flexibility: Easy to adjust styles for all reports by changing one place in your code
+- Distribution: No need to maintain and distribute multiple template versions
+:::
+
+```{r}
+path_to_template <- here("template", "template-01.docx")
+
+doc <- read_docx(path = path_to_template)
+
+table_styles <- styles_info(doc)
+
+# Create "Table Caption" style for table titles
+doc <- docx_set_paragraph_style(
+  doc,
+  base_on = "Normal",
+  style_id = "TableCaption",
+  style_name = "Table Caption",
+  fp_p = fp_par(text.align = "center", padding.top = 12, padding.bottom = 3),
+  fp_t = fp_text_lite(
+    font.family = "Arial",
+    italic = TRUE,
+    font.size = 11,
+    color = "#333333"
+  )
+)
+
+# Create "Image Caption" style for figure titles
+doc <- docx_set_paragraph_style(
+  doc,
+  base_on = "Normal",
+  style_id = "ImageCaption",
+  style_name = "Image Caption",
+  fp_p = fp_par(text.align = "center", padding.top = 3, padding.bottom = 12),
+  fp_t = fp_text_lite(
+    font.family = "Arial",
+    italic = TRUE,
+    font.size = 11,
+    color = "#333333"
+  )
+)
+
+# Create "Graphic" style for centering graphics
+doc <- docx_set_paragraph_style(
+  doc,
+  base_on = "Normal",
+  style_id = "graphic",
+  style_name = "Graphic",
+  fp_p = fp_par(text.align = "center", padding.top = 3, padding.bottom = 3)
+)
+
+# Save the enriched template
+print(doc, target = here("template", "template-02.docx"))
+```
+
+How we'll use these styles:
+
+Throughout our report generation process, we'll use these styles to:
+- Apply `"Table Caption"` to titles above tables (e.g., "Table 1: Demographics")
+- Apply `"Image Caption"` to titles above figures (e.g., "Figure 1: Vital Signs Over Time")
+- Apply `"Graphic"` as the paragraph style when inserting plots with `body_add_gg()`
+
+This creates visual consistency: all table captions look the same, all figure captions look the same, and all graphics are properly centered.
+
+### Testing the New Styles
+
+Before using the styles in production, let's verify they were created correctly and see how they render:
+
+```{r eval=FALSE}
+doc <- read_docx(path = here("template", "template-02.docx"))
+
+# Test built-in heading styles
+doc <- body_add_par(doc, "Heading 1 Example", style = "heading 1")
+doc <- body_add_par(doc, "Heading 2 Example", style = "heading 2")
+doc <- body_add_par(doc, "Heading 3 Example", style = "heading 3")
+doc <- body_add_par(doc, "Heading 4 Example", style = "heading 4")
+doc <- body_add_par(doc, "Heading 5 Example", style = "heading 5")
+
+# Test our custom styles
+doc <- body_add_par(doc, "Table 1: Example Table Caption", style = "Table Caption")
+doc <- body_add_par(doc, "Figure 1: Example Image Caption", style = "Image Caption")
+
+# Preview in Word
+print(doc, preview = TRUE)
+```
+
+::: {.callout-tip title="Interactive Preview"}
+Using `print(doc, preview = TRUE)` opens the document in Word immediately, allowing you to verify formatting before generating hundreds of patient reports. This is invaluable during development.
+:::
+
+## Setting Global Defaults
+
+To ensure consistency across all tables and plots in our reports, we'll set global defaults for flextable and ggplot2:
+
+```{r}
+path_to_template <- here("template", "template-02.docx")
+
+# Set flextable defaults
+set_flextable_defaults(
+  table.layout = "autofit", # Let Word optimize column widths
+  font.family = "Arial", # Match our organization's standard
+  font.size = 11, # Standard body text size
+  digits = 2 # Two decimal places for numbers
+)
+
+# Set ggplot2 theme
+theme_set(
+  theme_minimal(
+    base_family = "Arial" # Match font across tables and plots
+  )
+)
+```
+
+Why set these defaults?
+
+- flextable defaults: Every table we create will automatically use Arial 11pt with 2 decimal places. We don't need to repeat `colformat_double(digits = 2)` every time.
+- ggplot2 theme: All plots will have a clean minimal theme with Arial font, matching our tables and maintaining visual consistency.
+
+## Preparing the Data
+
+Clinical trial data is typically organized in CDISC ADaM datasets. We'll work with:
+- `adsl`: Subject-Level Analysis Dataset (demographics, dates)
+- `advs_metabolic`: Analysis Dataset for Vital Signs (metabolic measurements)
+
+### Structuring Data for Individual Reports
+
+We need to nest the data so we have one row per patient, with their complete data stored in nested data frames:
+
+```{r}
+# Subject-level data
+SL_TBLS <- pharmaverseadam::adsl |>
+  select(USUBJID, RFSTDTC, RFENDTC, AGE, SEX) |>
+  nest(.by = USUBJID, .key = "SL")
+
+# Metabolic vital signs data
+METABOLIC_TBLS <- pharmaverseadam::advs_metabolic |>
+  dplyr::filter(
+    !PARAMCD %in% c("HEIGHT", "WEIGHT", "BMI") # Exclude non-metabolic parameters
+  ) |>
+  select(USUBJID, AVISIT, ADY, AVAL, PARAMCD) |>
+  drop_na() |>
+  # Average multiple measurements per visit
+  summarise(AVAL = mean(AVAL, na.rm = TRUE), .by = c(USUBJID, AVISIT, ADY, PARAMCD)) |>
+  arrange(USUBJID, PARAMCD) |>
+  nest(.by = USUBJID, .key = "METABOLIC")
+
+# Combine both datasets
+LIST_TBLS <- inner_join(METABOLIC_TBLS, SL_TBLS, by = "USUBJID")
+
+# Define parameter labels for better readability
+labels <- c(
+  BMI = "Body Mass Index (kg/m2)",
+  DIABP = "Diastolic Blood Pressure (mmHg)",
+  HEIGHT = "Height (cm)",
+  HIPCIR = "Hip Circumference (cm)",
+  PULSE = "Pulse Rate (beats/min)",
+  SYSBP = "Systolic Blood Pressure (mmHg)",
+  TEMP = "Temperature (C)",
+  WAISTHIP = "Waist to Hip Ratio",
+  WEIGHT = "Weight (kg)",
+  WSTCIR = "Waist Circumference (cm)"
+)
+```
+
+```{r include=FALSE}
+saveRDS(LIST_TBLS, here("data/LIST_TBLS.RDS"))
+saveRDS(labels, here("data/LABELS.RDS"))
+```
+
+
+::: {.callout-note title="data structure"}
+
+After nesting, `LIST_TBLS` has one row per patient with two list-columns:
+
+- `SL`: A data frame with subject-level information
+- `METABOLIC`: A data frame with all metabolic vital signs measurements
+
+This structure makes it easy to iterate over patients and extract their complete data for each report.
+
+:::
+
+## Generating Individual Patient Reports
+
+Now we'll loop through each patient and generate their individual report. Each report will have:
+
+1. A table of contents
+2. Subject-level information table
+3. Vital signs plots
+4. Vital signs summary table
+
+```{r}
+sub_path <- here("output", "patient-profile", "simple")
+
+# Create output directory
+dir.create(sub_path, showWarnings = FALSE, recursive = TRUE)
+
+# Loop through each patient
+for (i in seq_len(nrow(LIST_TBLS))) {
+  # Get patient ID and create filename
+  USUBJID_STR <- LIST_TBLS[["USUBJID"]][i]
+
+  # result file path
+  file_basename <- paste0(USUBJID_STR, ".docx")
+  fileout <- file.path(sub_path, file_basename)
+
+  # Start with the template
+  doc <- read_docx(path = path_to_template)
+
+  # Add table of contents
+  doc <- body_add_toc(doc)
+  doc <- body_add_break(doc)
+
+  ## Section 1: Subject-Level Analysis ----
+
+  # Extract subject-level data for this patient
+  SL_TBL <- LIST_TBLS[["SL"]][[i]]
+
+  # Create a formatted table with proper labels
+  tab1 <- as_flextable(SL_TBL, show_coltype = FALSE) |>
+    labelizor(
+      labels = pharmaverseadam::adsl |>
+        labelled::get_variable_labels() |>
+        unlist()
+    ) |>
+    padding(padding = 6)
+
+  # Add section heading and table
+  doc <- body_add_par(doc, value = "Subject Level Analysis", style = "heading 1")
+  doc <- body_add_flextable(doc, tab1, align = "center")
+
+  ## Section 2: Vital Signs Analysis ----
+
+  # Extract metabolic data for this patient
+  METABOLIC_TBL <- LIST_TBLS[["METABOLIC"]][[i]] |>
+    mutate(ADY = as.Date(ADY))
+
+  # Create time series plot
+  gg <- ggplot(METABOLIC_TBL, aes(ADY, AVAL)) +
+    geom_path() +
+    scale_x_date(date_breaks = "4 weeks", date_labels = "%W") +
+    facet_wrap(~PARAMCD, scales = "free_y") +
+    labs(
+      x = "Study Week",
+      y = "Measurement Value",
+      title = NULL
+    )
+
+  # Add section heading, subsection, and plot
+  doc <- body_add_par(doc, value = "Vital Signs Analysis for Metabolic", style = "heading 1")
+  doc <- body_add_par(doc, value = "Graphic", style = "heading 2")
+  doc <- body_add_gg(doc, gg, style = "Graphic")
+
+  # Create summary table (wide format)
+  ft <- METABOLIC_TBL |>
+    pivot_wider(
+      id_cols = c(AVISIT),
+      names_from = PARAMCD,
+      values_from = AVAL
+    ) |>
+    flextable() |>
+    theme_vanilla() |>
+    colformat_double(digits = 2) |>
+    labelizor(labels = labels)
+
+  # Add subsection and table
+  doc <- body_add_par(doc, value = "Table", style = "heading 2")
+  doc <- body_add_flextable(doc, ft, align = "center")
+
+  # Save the patient's report
+  print(doc, target = fileout)
+}
+```
+
+::: {.callout-caution title="Report Generation Process"}
+
+Let's break down what happens for each patient:
+
+1. Table of Contents
+
+```r
+doc <- body_add_toc(doc)
+doc <- body_add_break(doc)
+```
+
+- Adds an automatically generated TOC based on heading styles
+- Requires users to update fields in Word (right-click > Update Field)
+- Page break ensures content starts on a new page
+
+2. Subject Demographics Table
+
+```r
+tab1 <- as_flextable(SL_TBL, show_coltype = FALSE) |>
+  labelizor(...) |>
+  padding(padding = 6)
+```
+
+- `as_flextable()` converts the data frame to a flextable
+- `labelizor()` replaces technical variable names with human-readable labels from the CDISC metadata
+- `padding()` adds cell padding for better readability
+
+3. Time Series Plot
+
+```r
+gg <- ggplot(METABOLIC_TBL, aes(ADY, AVAL)) +
+  geom_path() +
+  facet_wrap(~PARAMCD, scales = "free_y")
+```
+
+- Creates separate panels for each metabolic parameter
+- `scales = "free_y"` allows each parameter to have its own y-axis scale
+
+4. Summary Table
+
+```r
+pivot_wider(id_cols = c(AVISIT), names_from = PARAMCD, values_from = AVAL)
+```
+
+- Transforms long data (one row per measurement) to wide format (one row per visit)
+- Each parameter becomes a column
+- Makes it easy to compare parameters at each visit
+
+
+:::
+
+## Reports with captions
+
+The previous example demonstrated basic report generation. Now we'll enhance it with automatic numbering for tables and figures, along with dedicated table of figures (ToF) and table of tables (ToT).
+
+### Why Use Automatic Numbering?
+
+In pharmaceutical reports:
+
+- Tables and figures must be numbered sequentially
+- Captions need consistent formatting
+- Cross-references should update automatically
+- Regulatory requirements often mandate specific caption styles
+
+The `run_autonum()` function provides automatic sequential numbering that updates when content is reordered.
+
+### Understanding autonumbered runs
+
+Use `fpar()` with `run_autonum()` to create a paragraph-caption:
+
+```r
+fpar(
+  run_autonum(seq_id = "table", pre_label = "Table "),
+  "Description of the table",
+  fp_p = fp_par_lite(
+    word_style = "Table Caption",
+    keep_with_next = TRUE
+  )
+)
+```
+
+Key features:
+
+- `seq_id`: Creates a unique numbering sequence (e.g., "table" for tables, "fig" for figures)
+- `pre_label`: Text before the number (e.g., "Table " or "Figure ")
+- `keep_with_next = TRUE`: Ensures captions stay with their content (critical for pagination)
+
+### Generating Reports with Automatic Numbering
+
+Let's create enhanced patient reports with automatic numbering:
+
+```{r}
+sub_path <- here("output", "patient-profile", "with-captions")
+
+# Create output directory
+dir.create(sub_path, showWarnings = FALSE, recursive = TRUE)
+
+# Loop through each patient
+for (i in seq_len(nrow(LIST_TBLS))) {
+  # Get patient ID and create filename
+  USUBJID_STR <- LIST_TBLS[["USUBJID"]][i]
+  file_basename <- paste0(USUBJID_STR, ".docx")
+  fileout <- file.path(sub_path, file_basename)
+
+  # Start with the template
+  doc <- read_docx(path = path_to_template)
+
+  # Add table of contents for headings
+  doc <- body_add_toc(doc)
+  doc <- body_add_break(doc)
+
+  # Add table of tables
+  doc <- body_add_par(doc, "List of Tables", style = "heading 1")
+  doc <- body_add_toc(doc, style = "Table Caption")
+  doc <- body_add_break(doc)
+
+  # Add table of figures
+  doc <- body_add_par(doc, "List of Figures", style = "heading 1")
+  doc <- body_add_toc(doc, style = "Image Caption")
+  doc <- body_add_break(doc)
+
+  ## Section 1: Subject-Level Analysis ----
+
+  # Extract subject-level data for this patient
+  SL_TBL <- LIST_TBLS[["SL"]][[i]]
+
+  # Create a formatted table with proper labels
+  tab1 <- as_flextable(SL_TBL, show_coltype = FALSE) |>
+    labelizor(
+      labels = pharmaverseadam::adsl |>
+        labelled::get_variable_labels() |>
+        unlist()
+    ) |>
+    padding(padding = 6)
+
+  # Add section heading
+  doc <- body_add_par(doc, value = "Subject Level Analysis", style = "heading 1")
+
+  # Add table caption with automatic numbering
+  doc <- body_add_fpar(
+    doc,
+    fpar(
+      run_autonum(seq_id = "table", pre_label = "Table "),
+      "Subject Demographics and Baseline Characteristics",
+      fp_p = fp_par_lite(
+        word_style = "Table Caption",
+        keep_with_next = TRUE
+      )
+    )
+  )
+
+  # Add the table
+  doc <- body_add_flextable(doc, tab1, align = "center")
+
+  ## Section 2: Vital Signs Analysis ----
+
+  # Extract metabolic data for this patient
+  METABOLIC_TBL <- LIST_TBLS[["METABOLIC"]][[i]] |>
+    mutate(ADY = as.Date(ADY))
+
+  # Create time series plot
+  gg <- ggplot(METABOLIC_TBL, aes(ADY, AVAL)) +
+    geom_path() +
+    scale_x_date(date_breaks = "4 weeks", date_labels = "%W") +
+    facet_wrap(~PARAMCD, scales = "free_y") +
+    labs(
+      x = "Study Week",
+      y = "Measurement Value",
+      title = NULL
+    )
+
+  # Add section heading
+  doc <- body_add_par(doc, value = "Vital Signs Analysis for Metabolic", style = "heading 1")
+
+  # Add subsection
+  doc <- body_add_par(doc, value = "Longitudinal Trends", style = "heading 2")
+
+  # Add the plot
+  doc <- body_add_gg(doc, gg, style = "Graphic")
+  doc <- body_add_fpar(
+    doc,
+    fpar(
+      run_autonum(seq_id = "fig", pre_label = "Figure "),
+      "Metabolic Vital Signs Over Time by Parameter",
+      fp_p = fp_par_lite(
+        word_style = "Image Caption",
+        keep_with_next = FALSE
+      )
+    )
+  )
+
+  # Create summary table (wide format)
+  ft <- METABOLIC_TBL |>
+    pivot_wider(
+      id_cols = AVISIT,
+      names_from = PARAMCD,
+      values_from = AVAL
+    ) |>
+    flextable() |>
+    theme_vanilla() |>
+    colformat_double(digits = 2) |>
+    labelizor(labels = labels)
+
+  # Add subsection
+  doc <- body_add_par(doc, value = "Summary by Visit", style = "heading 2")
+
+  # Add table caption with automatic numbering
+  doc <- body_add_fpar(
+    doc,
+    fpar(
+      run_autonum(seq_id = "table", pre_label = "Table "),
+      "Metabolic Vital Signs Summary by Study Visit",
+      fp_p = fp_par_lite(
+        word_style = "Table Caption",
+        keep_with_next = TRUE
+      )
+    )
+  )
+
+  # Add the table
+  doc <- body_add_flextable(doc, ft, align = "center")
+
+  # Save the patient's report
+  print(doc, target = fileout)
+}
+```
+
+
+### Updating the Tables of Contents
+
+After generating the documents, users need to update the fields in Word:
+
+1. Open the generated document
+2. Press `Ctrl+A` (Windows) or `Cmd+A` (Mac) to select all
+3. Press `F9` to update all fields
+4. The TOC, ToT, and ToF will populate with the correct page numbers
+
+::: {.callout-tip title="Automating Field Updates"}
+While Word requires manual field updates by default, you can automate this using VBA macros or the 'doconv' package if you need to process many documents programmatically.
+:::
+
